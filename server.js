@@ -70,24 +70,27 @@ var parseDataQuery = function(req, debug) {
 
 // create single event based on data which includes time, event & properties
 var createAndLogEvent = function(data, req) {
-  var time = (data && data.t) || new Date().toISOString(),
+  var serverTime = new Date().toISOString(),
+      time = data && data.t ? data.t : null,
       event = (data && data.e) || "unknown",
       properties = (data && data.kv) || {};
 
   // append some request headers (ip, referrer, user-agent) to list of properties
+  properties.ctime = time;
   properties.ip = req.ip;
   properties.origin = (req.get("Origin")) ? req.get("Origin").replace(/^https?:\/\//, '') : "";
   properties.page = req.get("Referer");
   properties.useragent = req.get("User-Agent");
 
   // log event data in splunk friendly timestamp + key/value(s) format
-  var entry = time + " event=" + parseValue(event);
+  var entry = serverTime + " event=" + parseValue(event);
   for (var key in properties) {
     var value = parseValue(properties[key]);
     entry += " " + key + "=" + value;
   }
   entry += "\n";
-  fs.appendFile(path.resolve(__dirname, './events.log'), entry, function(err) {
+  var fileDate = serverTime.split('T')[0];
+  fs.appendFile(path.resolve(__dirname, './events-' + fileDate + '.log'), entry, function(err) {
     if (err) {
       console.log(err);
     } else {
