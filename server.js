@@ -3,6 +3,7 @@ var fs = require('fs');
 var path = require('path');
 var http = require('http');
 var https = require('https');
+var net = require('net');
 var app = express();
 
 var HTTP_PORT = 3000,
@@ -11,6 +12,25 @@ var HTTP_PORT = 3000,
       key: fs.readFileSync(path.resolve(__dirname,'.ssl/www.example.com.key')),
 	  cert: fs.readFileSync(path.resolve(__dirname,'.ssl/www.example.com.cert'))
     };
+
+/*
+ *  Create connection to Graphite
+ **********************************
+ */
+var client = new net.Socket();
+
+client.on('close', function() {
+	console.log('Connection closed. Reconnecting...');
+	connectToGraphite();
+});
+
+var connectToGraphite = function(){
+	client.connect(2003, 'localhost', function() {
+		console.log('Connected to Graphite');
+	});
+};
+
+connectToGraphite();
 
 /*
  *  Define Middleware & Utilties
@@ -67,6 +87,34 @@ var parseDataQuery = function(req, debug) {
   }
   return data;
 }
+
+var logMetric = function(data, req){
+	
+	for (var key in data) {
+		// sample: http://localhost:3000/metric?data={%22master.apps.cc.test_metric%22:1}
+		if (typeof(data[key]) == 'number') {
+			sendMetricToGraphite(key, data[key], (new Date().getTime()/1000));
+		}
+		// sample: http://localhost:3000/metric?data={%22master.apps.cc.test_metric%22:{%221422617093.767%22:1,%221422617103.767%22:4}}
+		else if (typeof(data[key]) == 'object') {
+			var metrics = data[key];
+			for (var t in metrics){
+				sendMetricToGraphite(key, metrics[t], t);
+			}
+		}
+	}
+};
+
+var sendMetricToGraphite = function(key, value, timestamp){
+	var s = key + ' ' + value + ' ' + timestamp + '\r\n';
+	console.log(s);
+	try {
+		client.write(s);
+	}
+	catch (e){
+		console.log(e);
+	}
+};
 
 // create single event based on data which includes time, event & properties
 var createAndLogEvent = function(data, req) {
@@ -127,6 +175,18 @@ app.get('/track', function(req, res) {
   createAndLogEvent(data, req);
   res.send('1');
 });
+
+app.get('/metric', function(req, res) {
+	  res.setHeader('Content-Type', 'application/json');
+	  var data;
+	  // data query param required here
+	  if ((data = parseDataQuery(req, true)) === false) {
+	    res.send('0');
+	  }
+	  //createAndLogEvent(data, req);
+	  logMetric(data, req);
+	  res.send('1');
+	});
 
 // IMG beacon tracking - data query optional
 app.get('/t.gif', function(req, res) {
